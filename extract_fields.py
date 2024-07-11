@@ -1,17 +1,21 @@
 import os
 from PIL import Image
 import torch
-from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import AutoModelForCausalLM, AutoProcessor, AutoConfig
 
 model_id = "microsoft/Phi-3-vision-128k-instruct"
 
-# Load the model and processor
+# Load the model configuration and disable FlashAttention2
+config = AutoConfig.from_pretrained(model_id)
+config.use_flash_attention = False  # Explicitly disable FlashAttention2
+
+# Load the model with the updated configuration
 model = AutoModelForCausalLM.from_pretrained(
     model_id,
+    config=config,
     device_map="auto",
     trust_remote_code=True,
-    torch_dtype="auto",
-    use_flash_attention=False  # Disable FlashAttention2
+    torch_dtype="auto"
 )
 
 processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
