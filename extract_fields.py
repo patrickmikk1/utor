@@ -1,37 +1,42 @@
 import os
-from PIL import Image
-import torch
-from transformers import BlipProcessor, BlipForConditionalGeneration
+from PIL import Image 
+import requests 
+from transformers import AutoModelForCausalLM 
+from transformers import AutoProcessor 
 
-# Load the model and processor
-model_name = "microsoft/Phi-3-vision-128k-instruct-onnx-cuda"
-processor = BlipProcessor.from_pretrained(model_name)
-model = BlipForConditionalGeneration.from_pretrained(model_name)
+model_id = "microsoft/Phi-3-vision-128k-instruct" 
 
-# Define the directory containing the .tif files
-directory = '~/socialwork'
+model = AutoModelForCausalLM.from_pretrained(model_id, device_map="cuda", trust_remote_code=True, torch_dtype="auto")
 
-# Function to process and extract fields from an image
-def extract_fields(image_path):
-    image = Image.open(image_path)
-    inputs = processor(images=image, return_tensors="pt")
+processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True) 
 
-    with torch.no_grad():
-        outputs = model.generate(**inputs)
-    
-    fields = processor.decode(outputs[0], skip_special_tokens=True)
-    return fields
+prompt="What is shown in this image?"
 
-# Loop through all .tif files in the directory and extract fields
-results = {}
-for filename in os.listdir(directory):
-    if filename.endswith(".tif"):
-        image_path = os.path.join(directory, filename)
-        fields = extract_fields(image_path)
-        results[filename] = fields
-        print(f"Extracted fields from {filename}: {fields}")
+messages = [ 
+    {"role": "user", "content": "<|image_1|>\nWhat is shown in this image?"}, 
+    {"role": "assistant", "content": ""} 
+] 
 
-# Optionally, save the results to a file
-with open("extracted_fields.txt", "w") as f:
-    for filename, fields in results.items():
-        f.write(f"{filename}: {fields}\n")
+url = "https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" 
+
+image = Image.open('4a.png').convert('RGB')
+OR
+image = Image.open(requests.get(url, stream=True).raw) 
+
+prompt = processor.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+inputs = processor(prompt, [image], return_tensors="pt").to("cuda:0") 
+
+generation_args = { 
+    "max_new_tokens": 500, 
+    "temperature": 0.0, 
+    "do_sample": False, 
+} 
+
+generate_ids = model.generate(**inputs, eos_token_id=processor.tokenizer.eos_token_id, **generation_args) 
+
+# remove input tokens 
+generate_ids = generate_ids[:, inputs['input_ids'].shape[1]:]
+response = processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0] 
+
+print(response)
