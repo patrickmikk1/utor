@@ -1,42 +1,53 @@
 import os
-from PIL import Image 
-import requests 
-from transformers import AutoModelForCausalLM 
-from transformers import AutoProcessor 
+from PIL import Image
+import torch
+from transformers import AutoModelForCausalLM, AutoProcessor
 
-model_id = "microsoft/Phi-3-vision-128k-instruct" 
+model_id = "microsoft/Phi-3-vision-128k-instruct"
 
-model = AutoModelForCausalLM.from_pretrained(model_id, device_map="cuda", trust_remote_code=True, torch_dtype="auto")
+# Load the model and processor
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    device_map="auto",
+    trust_remote_code=True,
+    torch_dtype="auto",
+    use_flash_attention=False  # Disable FlashAttention2
+)
 
-processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True) 
+processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
-prompt="What is shown in this image?"
+# Define the prompt and messages
+prompt_text = "What is shown in this image?"
+messages = [
+    {"role": "user", "content": prompt_text},
+    {"role": "assistant", "content": ""}
+]
 
-messages = [ 
-    {"role": "user", "content": "<|image_1|>\nWhat is shown in this image?"}, 
-    {"role": "assistant", "content": ""} 
-] 
+# Define the directory containing the image files
+directory = os.path.expanduser('~/socialwork')
 
-url = "https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" 
+# Function to process and extract information from an image
+def process_image(image_path):
+    image = Image.open(image_path).convert('RGB')
+    prompt = processor.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = processor(prompt, [image], return_tensors="pt").to("cuda:0" if torch.cuda.is_available() else "cpu")
 
-image = Image.open('4a.png').convert('RGB')
-OR
-image = Image.open(requests.get(url, stream=True).raw) 
+    generation_args = {
+        "max_new_tokens": 500,
+        "temperature": 0.0,
+        "do_sample": False,
+    }
 
-prompt = processor.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    generate_ids = model.generate(**inputs, eos_token_id=processor.tokenizer.eos_token_id, **generation_args)
+    generate_ids = generate_ids[:, inputs['input_ids'].shape[1]:]  # Remove input tokens
+    response = processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
 
-inputs = processor(prompt, [image], return_tensors="pt").to("cuda:0") 
+    return response
 
-generation_args = { 
-    "max_new_tokens": 500, 
-    "temperature": 0.0, 
-    "do_sample": False, 
-} 
-
-generate_ids = model.generate(**inputs, eos_token_id=processor.tokenizer.eos_token_id, **generation_args) 
-
-# remove input tokens 
-generate_ids = generate_ids[:, inputs['input_ids'].shape[1]:]
-response = processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0] 
-
-print(response)
+# Loop through all files in the directory and process each image
+for filename in os.listdir(directory):
+    if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.bmp')):
+        image_path = os.path.join(directory, filename)
+        print(f"Processing {filename}...")
+        response = process_image(image_path)
+        print(f"Response for {filename}: {response}\n")
